@@ -1,0 +1,33 @@
+
+---
+
+## 📑 Datasets  
+
+Synthetic but realistic data with confounding:  
+
+1. **Healthcare**  
+   - Features: `age`, `comorbidity`, `prior_util`  
+   - Treatment: `new_drug` (0/1)  
+   - Outcome: `health_score improvement`  
+   - True effect: Higher effect for younger patients & fewer comorbidities  
+
+2. **Finance**  
+   - Features: `income_k`, `risk_score`, `tenure_m`  
+   - Treatment: `targeted_offer` (0/1)  
+   - Outcome: `monthly_spend uplift`  
+   - True effect: Higher effect for mid-income, low-risk customers  
+
+---
+
+## 🔧 Installation  
+
+```bash
+git clone https://github.com/<your-username>/causal-te-healthcare-finance.git
+cd causal-te-healthcare-finance
+
+# Setup environment
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
