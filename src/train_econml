@@ -1,0 +1,91 @@
+# src/train_econml.py
+from __future__ import annotations
+import argparse
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LogisticRegressionCV
+from sklearn.model_selection import train_test_split
+from econml.dr import DRLearner
+from data import generate_healthcare, generate_finance, _make_outputs_dir
+
+def run(domain: str, n: int, seed: int):
+    _make_outputs_dir()
+    if domain == "healthcare":
+        df = generate_healthcare(n=n, seed=seed)
+        x_cols = ["age", "comorbidity", "prior_util"]
+        subgroup_feature = "age"
+        subgroup_threshold = 60
+    elif domain == "finance":
+        df = generate_finance(n=n, seed=seed)
+        x_cols = ["income_k", "risk_score", "tenure_m"]
+        subgroup_feature = "risk_score"
+        subgroup_threshold = 0.0
+    else:
+        raise ValueError("domain must be 'healthcare' or 'finance'")
+
+    X = df[x_cols].values
+    T = df["treatment"].values
+    Y = df["outcome"].values
+
+    X_tr, X_te, T_tr, T_te, Y_tr, Y_te = train_test_split(X, T, Y, test_size=0.3, random_state=seed)
+
+    # DR-Learner: flexible outcome & propensity models
+    model_y = RandomForestRegressor(n_estimators=300, min_samples_leaf=10, random_state=seed)
+    model_t = LogisticRegressionCV(cv=3, max_iter=2000, n_jobs=None)
+    dr = DRLearner(model_regression=model_y, model_propensity=model_t)
+    dr.fit(Y_tr, T_tr, X=X_tr)
+
+    cate_te = dr.effect(X_te)  # CATE estimates on test
+    ate_hat = cate_te.mean()
+    naive_diff = np.mean(Y_te[T_te == 1]) - np.mean(Y_te[T_te == 0])
+
+    # Simple subgroup ATE
+    subgroup_mask = (df.loc[df.index.isin(pd.RangeIndex(len(df)).difference(X_tr.shape[0] * [True]))]  # not robust
+    # Simpler: recompute masks on test indices
+    # We'll rebuild a DataFrame aligned with test split for clarity
+    te_idx = pd.RangeIndex(len(X_te))
+    df_te = pd.DataFrame(X_te, columns=x_cols)
+    df_te["cate"] = cate_te
+    df_te["T"] = T_te
+    df_te["Y"] = Y_te
+
+    # Subgroup by threshold on a chosen feature
+    g = df_te[df_te[subgroup_feature if domain == "healthcare" else "risk_score"]
+              if domain == "finance" else df_te[subgroup_feature]]
+    # Simpler & explicit:
+    left_mask = df_te[subgroup_feature] <= subgroup_threshold
+    right_mask = ~left_mask
+    ate_left = df_te.loc[left_mask, "cate"].mean()
+    ate_right = df_te.loc[right_mask, "cate"].mean()
+
+    # Save histogram of CATE
+    fig = plt.figure()
+    plt.hist(cate_te, bins=40)
+    plt.xlabel("Estimated CATE")
+    plt.ylabel("Count")
+    plt.title(f"CATE distribution — {domain}")
+    plot_path = os.path.join("outputs", f"cate_hist_{domain}.png")
+    fig.savefig(plot_path, bbox_inches="tight", dpi=160)
+    plt.close(fig)
+
+    outpath = os.path.join("outputs", f"econml_{domain}.txt")
+    with open(outpath, "w") as f:
+        f.write(f"=== EconML DR-Learner ({domain}) ===\n")
+        f.write(f"ATE (mean CATE): {ate_hat:.4f}\n")
+        f.write(f"Naive treated-minus-control diff: {naive_diff:.4f}\n")
+        f.write(f"Subgroup ATE (<= threshold on {subgroup_feature}): {ate_left:.4f}\n")
+        f.write(f"Subgroup ATE (>  threshold on {subgroup_feature}): {ate_right:.4f}\n")
+        if "true_tau" in df.columns:
+            f.write("\nNote: true τ(X) exists in synthetic data; use for sanity checks in dev.\n")
+    print(f"[EconML] Wrote results to {outpath} and {plot_path}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--domain", choices=["healthcare", "finance"], default="healthcare")
+    parser.add_argument("--n", type=int, default=5000)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+    run(args.domain, args.n, args.seed)
