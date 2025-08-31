@@ -156,18 +156,7 @@ Subgroup ATE (high risk): 3.1
 - Use **DR-Learner** with flexible outcome & propensity models:  
   - Outcome: RandomForestRegressor  
   - Propensity: LogisticRegressionCV  
-- Estimate **CATEs** → compute ATE, subgroup averages, and visualize distributions  
-
----
-
-## 🏆 Interview Talking Points  
-
-- Designed realistic **synthetic causal datasets** with confounding + heterogeneity  
-- Applied **causal discovery & identification** (DoWhy)  
-- Validated robustness with **refutation tests**  
-- Estimated **heterogeneous treatment effects** with EconML’s DR-Learner  
-- Interpreted subgroup uplift (e.g., drug effects by age, marketing offers by risk profile)  
-- Clear **end-to-end pipeline**: data → model → inference → evaluation → visualization  
+- Estimate **CATEs** → compute ATE, subgroup averages, and visualize distributions   
 
 ---
 
