@@ -1,0 +1,72 @@
+# src/train_dowhy.py
+from __future__ import annotations
+import argparse
+import os
+import pandas as pd
+from data import generate_healthcare, generate_finance, _make_outputs_dir
+from dowhy import CausalModel
+
+def build_graph(columns, domain: str) -> str:
+    """
+    Simple backdoor graph: X -> T, X -> Y, and T -> Y.
+    """
+    x_nodes = [c for c in columns if c not in ("treatment", "outcome", "true_tau")]
+    edges = []
+    for x in x_nodes:
+        edges.append(f"{x} -> treatment;")
+        edges.append(f"{x} -> outcome;")
+    edges.append("treatment -> outcome;")
+    nodes = "; ".join(set(x_nodes + ["treatment", "outcome"]))
+    edge_str = " ".join(edges)
+    graph = f"digraph G {{ {edge_str} }}"
+    return graph
+
+def run(domain: str, n: int, seed: int):
+    _make_outputs_dir()
+    if domain == "healthcare":
+        df = generate_healthcare(n=n, seed=seed)
+    elif domain == "finance":
+        df = generate_finance(n=n, seed=seed)
+    else:
+        raise ValueError("domain must be 'healthcare' or 'finance'")
+
+    graph = build_graph(df.columns, domain)
+    model = CausalModel(
+        data=df,
+        treatment="treatment",
+        outcome="outcome",
+        graph=graph
+    )
+
+    identificand = model.identify_effect()
+    # Two common estimators: propensity weighting & linear regression adjustment
+    est_psw = model.estimate_effect(identificand,
+                                    method_name="backdoor.propensity_score_weighting")
+    est_lr = model.estimate_effect(identificand,
+                                   method_name="backdoor.linear_regression")
+
+    # Refutations (robustness checks)
+    ref_random = model.refute_estimate(identificand, est_psw, method_name="random_common_cause")
+    ref_placebo = model.refute_estimate(identificand, est_psw, method_name="placebo_treatment_refuter")
+    ref_subset = model.refute_estimate(identificand, est_psw, method_name="data_subset_refuter")
+
+    outpath = os.path.join("outputs", f"dowhy_{domain}.txt")
+    with open(outpath, "w") as f:
+        f.write(f"=== DoWhy ({domain}) ===\n")
+        f.write(f"PS Weighting ATE: {est_psw.value}\n")
+        f.write(f"Linear Regression ATE: {est_lr.value}\n\n")
+        f.write("— Refutations (PSW) —\n")
+        f.write(f"Random Common Cause: {ref_random}\n\n")
+        f.write(f"Placebo Treatment:   {ref_placebo}\n\n")
+        f.write(f"Data Subset:         {ref_subset}\n\n")
+        if "true_tau" in df.columns:
+            f.write(f"Sample mean of true τ(X): {df['true_tau'].mean():.4f}\n")
+    print(f"[DoWhy] Wrote results to {outpath}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--domain", choices=["healthcare", "finance"], default="healthcare")
+    parser.add_argument("--n", type=int, default=5000)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+    run(args.domain, args.n, args.seed)
